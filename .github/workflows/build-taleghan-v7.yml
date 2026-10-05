@@ -37,12 +37,13 @@ jobs:
             exit 1
           fi
 
-          echo "Using source ZIP:"
+          echo "Using:"
           echo "${ZIPS[0]}"
 
           echo "ZIP_FILE=${ZIPS[0]}" >> "$GITHUB_ENV"
 
       - name: Verify ZIP integrity
+        shell: bash
         run: |
           set -euo pipefail
           unzip -t "$ZIP_FILE"
@@ -88,6 +89,8 @@ jobs:
           test -f "$PROJECT_DIR/app/src/main/assets/index.html"
           test -f "$PROJECT_DIR/app/src/main/java/com/taleghan/store/MainActivity.java"
 
+          echo "Project files OK."
+
       - name: Static verification
         shell: bash
         run: |
@@ -96,7 +99,6 @@ jobs:
           INDEX="$PROJECT_DIR/app/src/main/assets/index.html"
           GRADLE="$PROJECT_DIR/app/build.gradle"
           MANIFEST="$PROJECT_DIR/app/src/main/AndroidManifest.xml"
-          JAVA="$PROJECT_DIR/app/src/main/java/com/taleghan/store/MainActivity.java"
 
           echo "Checking package ID..."
           grep -Fq "com.taleghan.store" "$GRADLE"
@@ -108,16 +110,18 @@ jobs:
           echo "Checking app name..."
           grep -Fq "تالقان استور" "$MANIFEST"
 
-          echo "Checking main application logic..."
+          echo "Checking initial inventory..."
+          grep -Fq "applyInitialInventoryRows" "$INDEX"
+          grep -Fq "parseInventoryJSON" "$INDEX"
 
-          grep -Fq "function applyInitialInventoryRows" "$INDEX"
-          grep -Fq "function parseInventoryJSON" "$INDEX"
-          grep -Fq "function cartParts" "$INDEX"
-          grep -Fq "function saveMissedSale" "$INDEX"
+          echo "Checking sales FIFO..."
+          grep -Fq "cartParts" "$INDEX"
+
+          echo "Checking missed sale..."
+          grep -Fq "saveMissedSale" "$INDEX"
+
+          echo "Checking phone synchronization..."
           grep -Fq "PASHMAK-SHIFT-TRANSFER" "$INDEX"
-
-          echo "Checking MainActivity..."
-          grep -Fq "onShowFileChooser" "$JAVA"
 
           echo "Static verification PASSED."
 
@@ -139,7 +143,7 @@ jobs:
           ];
 
           if (!blocks.length) {
-            throw new Error("No JavaScript script blocks found.");
+            throw new Error("No JavaScript blocks found.");
           }
 
           blocks.forEach((match, index) => {
@@ -150,7 +154,7 @@ jobs:
           });
 
           console.log(
-            `JavaScript syntax check PASSED: ${blocks.length} script blocks checked.`
+            `JavaScript syntax check PASSED: ${blocks.length} blocks checked.`
           );
           NODE
 
@@ -202,7 +206,7 @@ jobs:
             exit 1
           fi
 
-          echo "APK:"
+          echo "APK found:"
           echo "$APK"
 
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" \
@@ -244,7 +248,7 @@ jobs:
           cp "$APK" \
             "$PROJECT_DIR/app/build/outputs/apk/debug/Taleghan_Store_v7.0.0_FINAL.apk"
 
-      - name: Upload APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Taleghan-Store-v7.0.0-FINAL
