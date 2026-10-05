@@ -1,4 +1,4 @@
-name: Build Taleghan Store v7.0.0
+name: Build Taleghan Store v7.0.0 Release
 
 on:
   workflow_dispatch:
@@ -10,11 +10,15 @@ on:
       - "**/*.zip"
       - ".github/workflows/build-taleghan-v7.yml"
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v5
 
@@ -32,15 +36,15 @@ jobs:
 
           if [ "${#ZIPS[@]}" -ne 1 ]; then
             echo "ERROR: Expected exactly one Taleghan source ZIP."
-            echo "Found ${#ZIPS[@]} file(s):"
+            echo "Found ${#ZIPS[@]} ZIP file(s):"
             printf '%s\n' "${ZIPS[@]}"
             exit 1
           fi
 
-          echo "Using:"
-          echo "${ZIPS[0]}"
-
           echo "ZIP_FILE=${ZIPS[0]}" >> "$GITHUB_ENV"
+
+          echo "Using source:"
+          echo "${ZIPS[0]}"
 
       - name: Verify ZIP integrity
         shell: bash
@@ -66,32 +70,18 @@ jobs:
           SETTINGS=$(find project -type f -name "settings.gradle" | sort | head -n 1)
 
           if [ -z "$SETTINGS" ]; then
-            echo "ERROR: settings.gradle not found."
+            echo "ERROR: settings.gradle was not found."
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$SETTINGS")
 
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
           echo "Android project:"
           echo "$PROJECT_DIR"
 
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
       - name: Verify project files
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          test -f "$PROJECT_DIR/settings.gradle"
-          test -f "$PROJECT_DIR/build.gradle"
-          test -f "$PROJECT_DIR/app/build.gradle"
-          test -f "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
-          test -f "$PROJECT_DIR/app/src/main/assets/index.html"
-          test -f "$PROJECT_DIR/app/src/main/java/com/taleghan/store/MainActivity.java"
-
-          echo "Project files OK."
-
-      - name: Static verification
         shell: bash
         run: |
           set -euo pipefail
@@ -99,31 +89,78 @@ jobs:
           INDEX="$PROJECT_DIR/app/src/main/assets/index.html"
           GRADLE="$PROJECT_DIR/app/build.gradle"
           MANIFEST="$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+          JAVA="$PROJECT_DIR/app/src/main/java/com/taleghan/store/MainActivity.java"
+
+          test -f "$INDEX"
+          test -f "$GRADLE"
+          test -f "$MANIFEST"
+          test -f "$JAVA"
+
+          echo "Required files exist."
+
+      - name: Verify app identity
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          GRADLE="$PROJECT_DIR/app/build.gradle"
+          MANIFEST="$PROJECT_DIR/app/src/main/AndroidManifest.xml"
 
           echo "Checking package ID..."
+
           grep -Fq "com.taleghan.store" "$GRADLE"
 
-          echo "Checking version..."
-          grep -Fq "versionCode 700" "$GRADLE"
-          grep -Fq "versionName '7.0.0-taleghan'" "$GRADLE"
+          echo "Checking version code..."
 
-          echo "Checking app name..."
-          grep -Fq "تالقان استور" "$MANIFEST"
+          grep -Fq "versionCode 700" "$GRADLE"
+
+          echo "Checking version name..."
+
+          grep -Eq "versionName[[:space:]]+['\"]7\.0\.0-taleghan['\"]" "$GRADLE"
+
+          echo "Checking Persian app name..."
+
+          grep -Fq "طالقان استور" "$MANIFEST"
+
+          echo "Checking that incorrect spelling is absent..."
+
+          if grep -Fq "تالقان استور" "$MANIFEST"; then
+            echo "ERROR: Incorrect Persian name found."
+            exit 1
+          fi
+
+          echo "App identity verification PASSED."
+
+      - name: Verify required application features
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          INDEX="$PROJECT_DIR/app/src/main/assets/index.html"
+          JAVA="$PROJECT_DIR/app/src/main/java/com/taleghan/store/MainActivity.java"
 
           echo "Checking initial inventory..."
+
           grep -Fq "applyInitialInventoryRows" "$INDEX"
           grep -Fq "parseInventoryJSON" "$INDEX"
 
-          echo "Checking sales FIFO..."
+          echo "Checking FIFO sales logic..."
+
           grep -Fq "cartParts" "$INDEX"
 
           echo "Checking missed sale..."
+
           grep -Fq "saveMissedSale" "$INDEX"
 
           echo "Checking phone synchronization..."
+
           grep -Fq "PASHMAK-SHIFT-TRANSFER" "$INDEX"
 
-          echo "Static verification PASSED."
+          echo "Checking Android file picker..."
+
+          grep -Fq "onShowFileChooser" "$JAVA"
+
+          echo "Required feature verification PASSED."
 
       - name: JavaScript syntax check
         shell: bash
@@ -134,7 +171,8 @@ jobs:
           const fs = require("fs");
           const vm = require("vm");
 
-          const html = fs.readFileSync(process.argv[2], "utf8");
+          const file = process.argv[2];
+          const html = fs.readFileSync(file, "utf8");
 
           const blocks = [
             ...html.matchAll(
@@ -149,7 +187,9 @@ jobs:
           blocks.forEach((match, index) => {
             new vm.Script(
               match[1],
-              { filename: `index-script-${index}.js` }
+              {
+                filename: `index-script-${index}.js`
+              }
             );
           });
 
@@ -169,7 +209,7 @@ jobs:
         with:
           gradle-version: "8.7"
 
-      - name: Setup Android SDK
+      - name: Setup Android
         uses: android-actions/setup-android@v4
 
       - name: Install Android SDK 35
@@ -184,35 +224,87 @@ jobs:
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Build APK
+      - name: Build Release APK
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          gradle clean assembleDebug --no-daemon --stacktrace
+          gradle clean assembleRelease \
+            --no-daemon \
+            --stacktrace
 
-      - name: Verify APK
+      - name: Create Release signing key
         shell: bash
         run: |
           set -euo pipefail
 
-          APK=$(find \
-            "$PROJECT_DIR/app/build/outputs/apk/debug" \
+          keytool -genkeypair \
+            -v \
+            -keystore "$RUNNER_TEMP/taleghan-release.jks" \
+            -storetype PKCS12 \
+            -alias taleghan-release \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass "TaleghanRelease2026!" \
+            -keypass "TaleghanRelease2026!" \
+            -dname "CN=Taleghan Store, OU=Store, O=Taleghan Store, L=Tehran, ST=Tehran, C=IR"
+
+      - name: Align and sign Release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          UNSIGNED=$(find \
+            "$PROJECT_DIR/app/build/outputs/apk/release" \
             -type f \
             -name "*.apk" \
             | sort \
             | head -n 1)
 
-          if [ -z "$APK" ]; then
-            echo "ERROR: APK was not generated."
+          if [ -z "$UNSIGNED" ]; then
+            echo "ERROR: Release APK was not generated."
             exit 1
           fi
 
-          echo "APK found:"
-          echo "$APK"
+          mkdir -p "$PROJECT_DIR/app/build/outputs/final"
+
+          ALIGNED="$PROJECT_DIR/app/build/outputs/final/Taleghan_Store_v7.0.0_RELEASE_aligned.apk"
+
+          FINAL="$PROJECT_DIR/app/build/outputs/final/Taleghan_Store_v7.0.0_RELEASE.apk"
+
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" \
+            -f 4 \
+            "$UNSIGNED" \
+            "$ALIGNED"
+
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
+            --ks "$RUNNER_TEMP/taleghan-release.jks" \
+            --ks-key-alias taleghan-release \
+            --ks-pass pass:"TaleghanRelease2026!" \
+            --key-pass pass:"TaleghanRelease2026!" \
+            --out "$FINAL" \
+            "$ALIGNED"
+
+          rm -f "$ALIGNED"
+
+          echo "Release APK signed."
+
+      - name: Verify final APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK="$PROJECT_DIR/app/build/outputs/final/Taleghan_Store_v7.0.0_RELEASE.apk"
+
+          test -f "$APK"
+
+          echo "Checking APK signature..."
 
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" \
             verify \
             --verbose \
             "$APK"
+
+          echo "Reading APK package information..."
 
           BADGING=$(
             "$ANDROID_HOME/build-tools/35.0.0/aapt" \
@@ -231,26 +323,11 @@ jobs:
           echo "$BADGING" | \
             grep -Fq "versionName='7.0.0-taleghan'"
 
-          echo "APK verification PASSED."
+          echo "FINAL RELEASE APK VERIFICATION PASSED."
 
-      - name: Rename APK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          APK=$(find \
-            "$PROJECT_DIR/app/build/outputs/apk/debug" \
-            -type f \
-            -name "*.apk" \
-            | sort \
-            | head -n 1)
-
-          cp "$APK" \
-            "$PROJECT_DIR/app/build/outputs/apk/debug/Taleghan_Store_v7.0.0_FINAL.apk"
-
-      - name: Upload APK
+      - name: Upload final APK
         uses: actions/upload-artifact@v4
         with:
-          name: Taleghan-Store-v7.0.0-FINAL
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/Taleghan_Store_v7.0.0_FINAL.apk
+          name: Taleghan-Store-v7.0.0-RELEASE
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/final/Taleghan_Store_v7.0.0_RELEASE.apk
           if-no-files-found: error
